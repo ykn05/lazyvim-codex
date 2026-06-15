@@ -17,8 +17,12 @@ local function valid_win(winid)
   return winid and vim.api.nvim_win_is_valid(winid)
 end
 
+local function valid_codex_win(winid)
+  return valid_win(winid) and valid_buf(state.bufnr) and vim.api.nvim_win_get_buf(winid) == state.bufnr
+end
+
 local function valid_code_win(winid)
-  if not valid_win(winid) or winid == state.winid then
+  if not valid_win(winid) or valid_codex_win(winid) then
     return false
   end
 
@@ -103,9 +107,30 @@ local function remember_code_window()
 
   local winid = vim.api.nvim_get_current_win()
   local buftype = vim.bo.buftype
-  if buftype ~= "terminal" and winid ~= state.winid then
+  if buftype ~= "terminal" and not valid_codex_win(winid) then
     state.last_code_winid = winid
   end
+end
+
+local function find_codex_window()
+  if valid_codex_win(state.winid) then
+    return state.winid
+  end
+
+  if not valid_buf(state.bufnr) then
+    return nil
+  end
+
+  for _, tabpage in ipairs(vim.api.nvim_list_tabpages()) do
+    for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(tabpage)) do
+      if valid_codex_win(winid) then
+        state.winid = winid
+        return winid
+      end
+    end
+  end
+
+  return nil
 end
 
 local function enter_terminal()
@@ -114,6 +139,19 @@ local function enter_terminal()
       vim.cmd.startinsert()
     end
   end)
+end
+
+local function restore_codex_window(winid)
+  if not valid_win(winid) or not valid_buf(state.bufnr) or not valid_job(state.job_id) then
+    return false
+  end
+
+  state.winid = winid
+  vim.api.nvim_set_current_win(winid)
+  vim.api.nvim_win_set_buf(winid, state.bufnr)
+  vim.api.nvim_win_set_width(winid, math.floor(vim.o.columns * 0.3))
+  enter_terminal()
+  return true
 end
 
 local function focus_code_window(insert)
@@ -127,7 +165,7 @@ local function focus_code_window(insert)
       end
     end
 
-    if vim.api.nvim_get_current_win() == state.winid then
+    if valid_codex_win(vim.api.nvim_get_current_win()) then
       vim.cmd.wincmd("h")
     end
   end
@@ -211,19 +249,25 @@ function M.focus_code_insert()
 end
 
 function M.toggle()
-  if valid_win(state.winid) then
+  local codex_winid = find_codex_window()
+  if codex_winid then
     local current = vim.api.nvim_get_current_win()
-    if current == state.winid then
+    if current == codex_winid then
       focus_code_window(true)
     else
       remember_code_window()
-      vim.api.nvim_set_current_win(state.winid)
+      vim.api.nvim_set_current_win(codex_winid)
       enter_terminal()
     end
     return
   end
 
-  open_window()
+  if valid_win(state.winid) and valid_buf(state.bufnr) and valid_job(state.job_id) then
+    restore_codex_window(state.winid)
+    return
+  else
+    open_window()
+  end
 
   if valid_buf(state.bufnr) and valid_job(state.job_id) then
     vim.api.nvim_win_set_buf(0, state.bufnr)
@@ -244,8 +288,12 @@ function M.setup()
   vim.api.nvim_create_autocmd({ "BufEnter", "WinEnter" }, {
     group = group,
     callback = function()
-      if valid_buf(state.bufnr) and vim.api.nvim_get_current_buf() == state.bufnr then
+      local winid = vim.api.nvim_get_current_win()
+      if valid_codex_win(winid) then
+        state.winid = winid
         enter_terminal()
+      elseif winid == state.winid and valid_buf(state.bufnr) and valid_job(state.job_id) then
+        restore_codex_window(winid)
       else
         remember_code_window()
         check_external_changes()
