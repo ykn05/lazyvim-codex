@@ -7,6 +7,8 @@ Codex agent workflow.
 
 - Opens Codex in a persistent right-side Neovim terminal.
 - Uses `Alt-h` to toggle between the editor and Codex.
+- Autosaves normal file buffers after a short delay so Codex can read the latest
+  editor changes from disk.
 - Automatically checks for external file changes while Codex is running, so files
   edited by Codex are reloaded without manual `:edit` or `:checktime`.
 - Keeps a small terminal layout and project-root-aware Codex startup.
