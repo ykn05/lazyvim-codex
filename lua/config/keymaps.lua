@@ -5,11 +5,55 @@
 local codex = require("config.codex")
 local window_sizes = require("config.window_sizes")
 
+local MIN_TERMINAL_WIDTH = 40
+
 codex.setup()
 window_sizes.setup()
 
 local function current_snacks_terminal()
   return type(vim.b.snacks_terminal) == "table" and vim.b.snacks_terminal or nil
+end
+
+local function numbered_terminal(count, cwd)
+  for _, terminal in ipairs(Snacks.terminal.list()) do
+    local info = terminal.buf and vim.b[terminal.buf].snacks_terminal
+    if type(info) == "table" and tostring(info.id) == tostring(count) and (not cwd or info.cwd == cwd) then
+      return terminal
+    end
+  end
+end
+
+local function visible_terminal_infos()
+  local infos = {}
+  for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    local bufnr = vim.api.nvim_win_get_buf(winid)
+    local info = vim.b[bufnr].snacks_terminal
+    local snacks_win = vim.w[winid].snacks_win
+    if
+      type(info) == "table"
+      and type(snacks_win) == "table"
+      and snacks_win.position == "bottom"
+      and vim.api.nvim_win_get_config(winid).relative == ""
+    then
+      infos[#infos + 1] = info
+    end
+  end
+  return infos
+end
+
+local function first_visible_terminal_count()
+  local first = nil
+  for _, info in ipairs(visible_terminal_infos()) do
+    local id = tonumber(info.id)
+    if id and (not first or id < first) then
+      first = id
+    end
+  end
+  return first or 1
+end
+
+local function has_room_for_new_terminal()
+  return math.floor(vim.o.columns / (#visible_terminal_infos() + 1)) >= MIN_TERMINAL_WIDTH
 end
 
 local function leave_terminal_input()
@@ -44,7 +88,12 @@ end
 
 local function focus_next_root_terminal()
   local terminal = current_snacks_terminal()
+  local cwd = terminal and terminal.cwd or LazyVim.root()
   local count = terminal and (tonumber(terminal.id) or 1) + 1 or 2
+  local target = numbered_terminal(count, cwd)
+  if not (target and target.win and vim.api.nvim_win_is_valid(target.win)) and not has_room_for_new_terminal() then
+    count = first_visible_terminal_count()
+  end
   focus_numbered_terminal(count)
 end
 
