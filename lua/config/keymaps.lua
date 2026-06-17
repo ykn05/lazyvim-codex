@@ -6,6 +6,7 @@ local codex = require("config.codex")
 local window_sizes = require("config.window_sizes")
 
 local MIN_TERMINAL_WIDTH = 40
+local MAX_TERMINALS = 3
 
 codex.setup()
 window_sizes.setup()
@@ -14,7 +15,13 @@ local function current_snacks_terminal()
   return type(vim.b.snacks_terminal) == "table" and vim.b.snacks_terminal or nil
 end
 
+local function terminal_count(count)
+  count = math.floor(tonumber(count) or 1)
+  return ((count - 1) % MAX_TERMINALS) + 1
+end
+
 local function numbered_terminal(count, cwd)
+  count = terminal_count(count)
   for _, terminal in ipairs(Snacks.terminal.list()) do
     local info = terminal.buf and vim.b[terminal.buf].snacks_terminal
     if type(info) == "table" and tostring(info.id) == tostring(count) and (not cwd or info.cwd == cwd) then
@@ -63,6 +70,7 @@ local function leave_terminal_input()
 end
 
 local function focus_numbered_terminal(count)
+  count = terminal_count(count)
   local terminal = current_snacks_terminal()
   local cwd = terminal and terminal.cwd or nil
   leave_terminal_input()
@@ -89,7 +97,7 @@ end
 local function focus_next_root_terminal()
   local terminal = current_snacks_terminal()
   local cwd = terminal and terminal.cwd or LazyVim.root()
-  local count = terminal and (tonumber(terminal.id) or 1) + 1 or 2
+  local count = terminal_count((terminal and tonumber(terminal.id) or 1) + 1)
   local target = numbered_terminal(count, cwd)
   if not (target and target.win and vim.api.nvim_win_is_valid(target.win)) and not has_room_for_new_terminal() then
     count = first_visible_terminal_count()
