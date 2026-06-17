@@ -5,12 +5,31 @@ return {
       picker = {
         sources = {
           explorer = {
+            config = function(opts)
+              opts = require("snacks.picker.source.explorer").setup(opts)
+              local confirm = require("snacks.explorer.actions").actions.confirm
+
+              opts.actions.confirm = function(picker, item, action)
+                confirm(picker, item, action)
+                vim.schedule(function()
+                  if not picker.closed then
+                    pcall(function()
+                      picker:focus("list", { show = true })
+                    end)
+                  end
+                end)
+              end
+
+              return opts
+            end,
             layout = {
               preset = "sidebar",
               preview = false,
               layout = {
-                width = 25,
-                min_width = 25,
+                width = function()
+                  return require("config.window_sizes").explorer_width()
+                end,
+                min_width = 20,
               },
             },
           },
@@ -18,7 +37,10 @@ return {
       },
       styles = {
         terminal = {
-          height = 0.2,
+          height = function()
+            return require("config.window_sizes").terminal_height()
+          end,
+          min_height = 3,
         },
       },
     },

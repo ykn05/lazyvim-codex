@@ -1,5 +1,7 @@
 local M = {}
 
+local window_sizes = require("config.window_sizes")
+
 local DEFAULT_WIDTH_RATIO = 0.3
 local MIN_CODEX_WIDTH = 20
 
@@ -8,10 +10,12 @@ local state = {
   winid = nil,
   job_id = nil,
   last_code_winid = nil,
-  codex_width = nil,
+  last_code_mode = "n",
+  codex_width = window_sizes.get("codex_width"),
   last_layout = nil,
   applying_width = false,
   opening_codex = false,
+  entering_terminal = false,
   checktime_timer = nil,
 }
 
@@ -44,6 +48,10 @@ end
 
 local function current_is_codex_buffer()
   return valid_buf(state.bufnr) and vim.api.nvim_get_current_buf() == state.bufnr
+end
+
+local function codex_terminal_active()
+  return current_is_codex_buffer() and valid_job(state.job_id)
 end
 
 local function stop_checktime_timer()
@@ -116,7 +124,12 @@ local function project_root()
   return marker and vim.fs.dirname(marker) or vim.uv.cwd()
 end
 
-local function remember_code_window()
+local function current_code_mode()
+  local mode = vim.api.nvim_get_mode().mode
+  return mode:sub(1, 1) == "i" and "i" or "n"
+end
+
+local function remember_code_window(opts)
   if state.opening_codex then
     return
   end
@@ -125,6 +138,9 @@ local function remember_code_window()
   local buftype = vim.bo.buftype
   if buftype ~= "terminal" and not valid_codex_win(winid) then
     state.last_code_winid = winid
+    if opts and opts.mode then
+      state.last_code_mode = current_code_mode()
+    end
   end
 end
 
@@ -242,6 +258,7 @@ sync_codex_width = function(opts)
 
   if current_width ~= state.codex_width then
     state.codex_width = current_width
+    window_sizes.set("codex_width", current_width)
   end
 
   update_layout_snapshot()
@@ -255,11 +272,26 @@ local function schedule_codex_width_sync(opts)
   end)
 end
 
+local function start_terminal_mode()
+  if state.entering_terminal or not codex_terminal_active() or vim.api.nvim_get_mode().mode == "t" then
+    return
+  end
+
+  state.entering_terminal = true
+  pcall(vim.cmd.startinsert)
+  state.entering_terminal = false
+end
+
+local function ensure_terminal_mode()
+  if codex_terminal_active() and vim.api.nvim_get_mode().mode ~= "t" then
+    vim.schedule(start_terminal_mode)
+  end
+end
+
 local function enter_terminal()
   vim.schedule(function()
-    if current_is_codex_buffer() then
-      vim.cmd.startinsert()
-    end
+    start_terminal_mode()
+    vim.defer_fn(start_terminal_mode, 20)
   end)
 end
 
@@ -277,7 +309,7 @@ local function restore_codex_window(winid)
   return true
 end
 
-local function focus_code_window(insert)
+local function focus_code_window(mode)
   if valid_code_win(state.last_code_winid) then
     vim.api.nvim_set_current_win(state.last_code_winid)
   else
@@ -293,7 +325,7 @@ local function focus_code_window(insert)
     end
   end
 
-  if insert and vim.bo.buftype ~= "terminal" then
+  if mode == "i" and vim.bo.buftype ~= "terminal" then
     vim.schedule(function()
       if vim.bo.buftype ~= "terminal" then
         vim.cmd.startinsert()
@@ -307,7 +339,7 @@ local function terminal_to_code()
 
   vim.schedule(function()
     if valid_buf(state.bufnr) then
-      M.focus_code_insert()
+      M.focus_code()
     end
   end)
 end
@@ -323,10 +355,10 @@ local function set_terminal_keymaps(bufnr)
   end, { buffer = bufnr, silent = true, desc = "Stay in Codex terminal mode" })
 
   vim.keymap.set("n", "<M-h>", function()
-    M.focus_code_insert()
+    M.focus_code()
   end, opts)
   vim.keymap.set("n", "<A-h>", function()
-    M.focus_code_insert()
+    M.focus_code()
   end, opts)
 end
 
@@ -366,11 +398,11 @@ local function open_window()
 end
 
 function M.focus_code()
-  focus_code_window(false)
+  focus_code_window(state.last_code_mode)
 end
 
 function M.focus_code_insert()
-  focus_code_window(true)
+  focus_code_window("i")
 end
 
 function M.toggle()
@@ -378,9 +410,9 @@ function M.toggle()
   if codex_winid then
     local current = vim.api.nvim_get_current_win()
     if current == codex_winid then
-      focus_code_window(true)
+      focus_code_window(state.last_code_mode)
     else
-      remember_code_window()
+      remember_code_window({ mode = true })
       vim.api.nvim_set_current_win(codex_winid)
       enter_terminal()
     end
@@ -391,6 +423,7 @@ function M.toggle()
     restore_codex_window(state.winid)
     return
   else
+    remember_code_window({ mode = true })
     open_window()
   end
 
@@ -428,12 +461,15 @@ function M.setup()
 
   vim.api.nvim_create_autocmd("ModeChanged", {
     group = group,
-    pattern = { "t:*", "*:n", "*:nt" },
+    pattern = "*",
     callback = function()
-      if current_is_codex_buffer() and vim.api.nvim_get_mode().mode ~= "t" then
-        enter_terminal()
-      end
+      ensure_terminal_mode()
     end,
+  })
+
+  vim.api.nvim_create_autocmd({ "FocusGained", "CursorHold", "CursorHoldI" }, {
+    group = group,
+    callback = ensure_terminal_mode,
   })
 
   vim.api.nvim_create_autocmd({ "WinClosed", "WinNew", "VimResized", "TabEnter" }, {

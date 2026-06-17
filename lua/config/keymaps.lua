@@ -3,8 +3,10 @@
 -- Add any additional keymaps here
 
 local codex = require("config.codex")
+local window_sizes = require("config.window_sizes")
 
 codex.setup()
+window_sizes.setup()
 
 local function focus_root_terminal()
   Snacks.terminal.focus(nil, { cwd = LazyVim.root() })
