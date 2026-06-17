@@ -1,13 +1,21 @@
 local M = {}
 
+local DEFAULT_WIDTH_RATIO = 0.3
+local MIN_CODEX_WIDTH = 20
+
 local state = {
   bufnr = nil,
   winid = nil,
   job_id = nil,
   last_code_winid = nil,
+  codex_width = nil,
+  last_layout = nil,
+  applying_width = false,
   opening_codex = false,
   checktime_timer = nil,
 }
+
+local sync_codex_width
 
 local function valid_buf(bufnr)
   return bufnr and vim.api.nvim_buf_is_valid(bufnr)
@@ -34,6 +42,10 @@ local function valid_job(job_id)
   return type(job_id) == "number" and job_id > 0
 end
 
+local function current_is_codex_buffer()
+  return valid_buf(state.bufnr) and vim.api.nvim_get_current_buf() == state.bufnr
+end
+
 local function stop_checktime_timer()
   if state.checktime_timer then
     state.checktime_timer:stop()
@@ -43,6 +55,10 @@ local function stop_checktime_timer()
 end
 
 local function check_external_changes()
+  if sync_codex_width then
+    sync_codex_width()
+  end
+
   if not valid_buf(state.bufnr) or not valid_job(state.job_id) then
     stop_checktime_timer()
     return
@@ -133,9 +149,115 @@ local function find_codex_window()
   return nil
 end
 
+local function normal_windows()
+  local wins = {}
+
+  for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if valid_win(winid) and vim.api.nvim_win_get_config(winid).relative == "" then
+      wins[#wins + 1] = winid
+    end
+  end
+
+  table.sort(wins)
+  return wins
+end
+
+local function layout_signature()
+  local wins = normal_windows()
+
+  return {
+    columns = vim.o.columns,
+    windows = table.concat(wins, ","),
+    count = #wins,
+  }
+end
+
+local function same_layout(left, right)
+  return left
+    and right
+    and left.columns == right.columns
+    and left.windows == right.windows
+    and left.count == right.count
+end
+
+local function clamp_codex_width(width)
+  width = math.floor(tonumber(width) or vim.o.columns * DEFAULT_WIDTH_RATIO)
+
+  local win_count = math.max(#normal_windows(), 1)
+  local separators = math.max(win_count - 1, 0)
+  local other_window_min = math.max(vim.o.winminwidth, 1) * math.max(win_count - 1, 0)
+  local max_width = vim.o.columns - separators - other_window_min
+  local min_width = math.min(MIN_CODEX_WIDTH, math.max(max_width, 1))
+
+  return math.max(min_width, math.min(width, math.max(max_width, min_width)))
+end
+
+local function default_codex_width()
+  return clamp_codex_width(vim.o.columns * DEFAULT_WIDTH_RATIO)
+end
+
+local function apply_codex_width(winid, width)
+  if not valid_win(winid) then
+    return
+  end
+
+  local target_width = clamp_codex_width(width or state.codex_width or default_codex_width())
+
+  state.applying_width = true
+  pcall(vim.api.nvim_set_option_value, "winfixwidth", true, { win = winid })
+  pcall(vim.api.nvim_win_set_width, winid, target_width)
+  state.applying_width = false
+end
+
+local function update_layout_snapshot()
+  state.last_layout = layout_signature()
+end
+
+sync_codex_width = function(opts)
+  if state.applying_width or state.opening_codex then
+    return
+  end
+
+  local winid = find_codex_window()
+  if not winid then
+    update_layout_snapshot()
+    return
+  end
+
+  local layout = layout_signature()
+  local layout_changed = not same_layout(layout, state.last_layout)
+  local current_width = vim.api.nvim_win_get_width(winid)
+
+  if not state.codex_width then
+    state.codex_width = current_width
+    update_layout_snapshot()
+    return
+  end
+
+  if layout_changed or (opts and opts.force_restore) then
+    apply_codex_width(winid, state.codex_width)
+    update_layout_snapshot()
+    return
+  end
+
+  if current_width ~= state.codex_width then
+    state.codex_width = current_width
+  end
+
+  update_layout_snapshot()
+end
+
+local function schedule_codex_width_sync(opts)
+  vim.schedule(function()
+    if sync_codex_width then
+      sync_codex_width(opts)
+    end
+  end)
+end
+
 local function enter_terminal()
   vim.schedule(function()
-    if valid_buf(state.bufnr) and vim.api.nvim_get_current_buf() == state.bufnr then
+    if current_is_codex_buffer() then
       vim.cmd.startinsert()
     end
   end)
@@ -149,7 +271,8 @@ local function restore_codex_window(winid)
   state.winid = winid
   vim.api.nvim_set_current_win(winid)
   vim.api.nvim_win_set_buf(winid, state.bufnr)
-  vim.api.nvim_win_set_width(winid, math.floor(vim.o.columns * 0.3))
+  apply_codex_width(winid, state.codex_width)
+  update_layout_snapshot()
   enter_terminal()
   return true
 end
@@ -195,9 +318,9 @@ local function set_terminal_keymaps(bufnr)
   vim.keymap.set("t", "<M-h>", terminal_to_code, opts)
   vim.keymap.set("t", "<A-h>", terminal_to_code, opts)
   vim.keymap.set("t", "<Esc>h", terminal_to_code, opts)
-  vim.keymap.set("t", "<Esc><Esc>", function()
-    pcall(vim.cmd.stopinsert)
-  end, { buffer = bufnr, silent = true, desc = "Terminal normal mode" })
+  vim.keymap.set("t", [[<C-\><C-n>]], function()
+    enter_terminal()
+  end, { buffer = bufnr, silent = true, desc = "Stay in Codex terminal mode" })
 
   vim.keymap.set("n", "<M-h>", function()
     M.focus_code_insert()
@@ -237,7 +360,9 @@ local function open_window()
   vim.cmd("botright vertical split")
   state.winid = vim.api.nvim_get_current_win()
   state.opening_codex = false
-  vim.api.nvim_win_set_width(state.winid, math.floor(vim.o.columns * 0.3))
+  state.codex_width = state.codex_width or default_codex_width()
+  apply_codex_width(state.winid, state.codex_width)
+  update_layout_snapshot()
 end
 
 function M.focus_code()
@@ -298,6 +423,30 @@ function M.setup()
         remember_code_window()
         check_external_changes()
       end
+    end,
+  })
+
+  vim.api.nvim_create_autocmd("ModeChanged", {
+    group = group,
+    pattern = { "t:*", "*:n", "*:nt" },
+    callback = function()
+      if current_is_codex_buffer() and vim.api.nvim_get_mode().mode ~= "t" then
+        enter_terminal()
+      end
+    end,
+  })
+
+  vim.api.nvim_create_autocmd({ "WinClosed", "WinNew", "VimResized", "TabEnter" }, {
+    group = group,
+    callback = function()
+      schedule_codex_width_sync({ force_restore = true })
+    end,
+  })
+
+  pcall(vim.api.nvim_create_autocmd, "WinResized", {
+    group = group,
+    callback = function()
+      schedule_codex_width_sync()
     end,
   })
 

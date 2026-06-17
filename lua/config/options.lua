@@ -3,6 +3,7 @@
 -- Add any additional options here
 
 vim.opt.ttimeoutlen = 200
+vim.opt.relativenumber = false
 
 vim.api.nvim_create_autocmd("VimEnter", {
   callback = function()

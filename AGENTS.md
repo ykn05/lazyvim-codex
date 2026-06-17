@@ -16,7 +16,7 @@ There is no dedicated test or asset directory in this config. Add new files unde
 - `nvim`: start Neovim and let lazy.nvim install or update missing plugins.
 - `nvim --headless "+lua require('config.codex'); print('codex config ok')" "+qa"`: quick load check for the Codex config.
 - `nvim --headless "+Lazy! sync" "+qa"`: synchronize plugins in a noninteractive session.
-- `stylua .`: format Lua files using the repository style.
+- `/home/zhhuang/.local/share/nvim/mason/bin/stylua .`: format Lua files using the repository style. `stylua` is installed by Mason here and may not be on the shell `PATH`.
 - `git status -sb`: inspect local changes before committing.
 
 ## Coding Style & Naming Conventions
@@ -35,4 +35,4 @@ Pull requests should include a brief description, validation steps run, and scre
 
 ## Agent-Specific Instructions
 
-Avoid reverting user edits in this config. Before editing existing files, check current status and preserve unrelated local changes. Prefer `rg` for search and `stylua` for formatting.
+Avoid reverting user edits in this config. Before editing existing files, check current status and preserve unrelated local changes. Prefer `rg` for search and `/home/zhhuang/.local/share/nvim/mason/bin/stylua` for formatting.
