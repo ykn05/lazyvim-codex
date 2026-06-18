@@ -4,8 +4,6 @@ local window_sizes = require("config.window_sizes")
 
 local DEFAULT_WIDTH_RATIO = 0.3
 local MIN_CODEX_WIDTH = 20
-local CODEX_SCROLL_LINES = 5
-local CODEX_PAGE_SCROLL_LINES = 15
 local CODEX_TERMINAL_SCROLLBACK = 100000
 
 local state = {
@@ -353,27 +351,9 @@ local function enter_codex_input()
   enter_terminal()
 end
 
-local function scroll_codex(lines)
-  local winid = valid_codex_win(vim.api.nvim_get_current_win()) and vim.api.nvim_get_current_win()
-    or find_codex_window()
-  if not winid then
-    return
-  end
-
+local function enter_codex_scroll_mode()
   state.manual_scrolling = true
   pcall(vim.cmd.stopinsert)
-
-  vim.schedule(function()
-    if not valid_codex_win(winid) then
-      return
-    end
-
-    vim.api.nvim_win_call(winid, function()
-      local count = math.abs(lines)
-      local key = lines < 0 and string.char(25) or string.char(5)
-      vim.cmd(("normal! %d%s"):format(count, key))
-    end)
-  end)
 end
 
 local function set_terminal_keymaps(bufnr)
@@ -407,30 +387,24 @@ local function set_terminal_keymaps(bufnr)
     silent = true,
     desc = "Enter Codex input",
   })
-
-  local function map_scroll(lhs, lines, desc)
-    vim.keymap.set({ "n", "t" }, lhs, function()
-      scroll_codex(lines)
-    end, {
-      buffer = bufnr,
-      silent = true,
-      nowait = true,
-      desc = desc,
-    })
-  end
-
-  map_scroll("<M-k>", -CODEX_SCROLL_LINES, "Scroll Codex up")
-  map_scroll("<A-k>", -CODEX_SCROLL_LINES, "Scroll Codex up")
-  map_scroll("<Esc>k", -CODEX_SCROLL_LINES, "Scroll Codex up")
-  map_scroll("<M-j>", CODEX_SCROLL_LINES, "Scroll Codex down")
-  map_scroll("<A-j>", CODEX_SCROLL_LINES, "Scroll Codex down")
-  map_scroll("<Esc>j", CODEX_SCROLL_LINES, "Scroll Codex down")
-  map_scroll("<M-u>", -CODEX_PAGE_SCROLL_LINES, "Page Codex up")
-  map_scroll("<A-u>", -CODEX_PAGE_SCROLL_LINES, "Page Codex up")
-  map_scroll("<Esc>u", -CODEX_PAGE_SCROLL_LINES, "Page Codex up")
-  map_scroll("<M-d>", CODEX_PAGE_SCROLL_LINES, "Page Codex down")
-  map_scroll("<A-d>", CODEX_PAGE_SCROLL_LINES, "Page Codex down")
-  map_scroll("<Esc>d", CODEX_PAGE_SCROLL_LINES, "Page Codex down")
+  vim.keymap.set({ "n", "t" }, "<M-;>", enter_codex_scroll_mode, {
+    buffer = bufnr,
+    silent = true,
+    nowait = true,
+    desc = "Enter Codex scroll mode",
+  })
+  vim.keymap.set({ "n", "t" }, "<A-;>", enter_codex_scroll_mode, {
+    buffer = bufnr,
+    silent = true,
+    nowait = true,
+    desc = "Enter Codex scroll mode",
+  })
+  vim.keymap.set({ "n", "t" }, "<Esc>;", enter_codex_scroll_mode, {
+    buffer = bufnr,
+    silent = true,
+    nowait = true,
+    desc = "Enter Codex scroll mode",
+  })
 end
 
 local function start_codex()
