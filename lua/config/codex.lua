@@ -399,12 +399,6 @@ local function set_terminal_keymaps(bufnr)
     nowait = true,
     desc = "Enter Codex scroll mode",
   })
-  vim.keymap.set({ "n", "t" }, "<Esc>;", enter_codex_scroll_mode, {
-    buffer = bufnr,
-    silent = true,
-    nowait = true,
-    desc = "Enter Codex scroll mode",
-  })
 end
 
 local function start_codex()
