@@ -4,6 +4,9 @@ local window_sizes = require("config.window_sizes")
 
 local DEFAULT_WIDTH_RATIO = 0.3
 local MIN_CODEX_WIDTH = 20
+local CODEX_SCROLL_LINES = 5
+local CODEX_PAGE_SCROLL_LINES = 15
+local CODEX_TERMINAL_SCROLLBACK = 100000
 
 local state = {
   bufnr = nil,
@@ -16,6 +19,7 @@ local state = {
   applying_width = false,
   opening_codex = false,
   entering_terminal = false,
+  manual_scrolling = false,
   checktime_timer = nil,
 }
 
@@ -283,7 +287,7 @@ local function start_terminal_mode()
 end
 
 local function ensure_terminal_mode()
-  if codex_terminal_active() and vim.api.nvim_get_mode().mode ~= "t" then
+  if not state.manual_scrolling and codex_terminal_active() and vim.api.nvim_get_mode().mode ~= "t" then
     vim.schedule(start_terminal_mode)
   end
 end
@@ -344,6 +348,34 @@ local function terminal_to_code()
   end)
 end
 
+local function enter_codex_input()
+  state.manual_scrolling = false
+  enter_terminal()
+end
+
+local function scroll_codex(lines)
+  local winid = valid_codex_win(vim.api.nvim_get_current_win()) and vim.api.nvim_get_current_win()
+    or find_codex_window()
+  if not winid then
+    return
+  end
+
+  state.manual_scrolling = true
+  pcall(vim.cmd.stopinsert)
+
+  vim.schedule(function()
+    if not valid_codex_win(winid) then
+      return
+    end
+
+    vim.api.nvim_win_call(winid, function()
+      local count = math.abs(lines)
+      local key = lines < 0 and string.char(25) or string.char(5)
+      vim.cmd(("normal! %d%s"):format(count, key))
+    end)
+  end)
+end
+
 local function set_terminal_keymaps(bufnr)
   local opts = { buffer = bufnr, silent = true, desc = "Focus code window" }
 
@@ -360,6 +392,45 @@ local function set_terminal_keymaps(bufnr)
   vim.keymap.set("n", "<A-h>", function()
     M.focus_code()
   end, opts)
+  vim.keymap.set("n", "i", enter_codex_input, {
+    buffer = bufnr,
+    silent = true,
+    desc = "Enter Codex input",
+  })
+  vim.keymap.set("n", "a", enter_codex_input, {
+    buffer = bufnr,
+    silent = true,
+    desc = "Enter Codex input",
+  })
+  vim.keymap.set("n", "<CR>", enter_codex_input, {
+    buffer = bufnr,
+    silent = true,
+    desc = "Enter Codex input",
+  })
+
+  local function map_scroll(lhs, lines, desc)
+    vim.keymap.set({ "n", "t" }, lhs, function()
+      scroll_codex(lines)
+    end, {
+      buffer = bufnr,
+      silent = true,
+      nowait = true,
+      desc = desc,
+    })
+  end
+
+  map_scroll("<M-k>", -CODEX_SCROLL_LINES, "Scroll Codex up")
+  map_scroll("<A-k>", -CODEX_SCROLL_LINES, "Scroll Codex up")
+  map_scroll("<Esc>k", -CODEX_SCROLL_LINES, "Scroll Codex up")
+  map_scroll("<M-j>", CODEX_SCROLL_LINES, "Scroll Codex down")
+  map_scroll("<A-j>", CODEX_SCROLL_LINES, "Scroll Codex down")
+  map_scroll("<Esc>j", CODEX_SCROLL_LINES, "Scroll Codex down")
+  map_scroll("<M-u>", -CODEX_PAGE_SCROLL_LINES, "Page Codex up")
+  map_scroll("<A-u>", -CODEX_PAGE_SCROLL_LINES, "Page Codex up")
+  map_scroll("<Esc>u", -CODEX_PAGE_SCROLL_LINES, "Page Codex up")
+  map_scroll("<M-d>", CODEX_PAGE_SCROLL_LINES, "Page Codex down")
+  map_scroll("<A-d>", CODEX_PAGE_SCROLL_LINES, "Page Codex down")
+  map_scroll("<Esc>d", CODEX_PAGE_SCROLL_LINES, "Page Codex down")
 end
 
 local function start_codex()
@@ -367,6 +438,7 @@ local function start_codex()
   vim.api.nvim_win_set_buf(0, state.bufnr)
   vim.bo[state.bufnr].bufhidden = "hide"
   vim.bo[state.bufnr].filetype = "codex"
+  vim.bo[state.bufnr].scrollback = CODEX_TERMINAL_SCROLLBACK
   vim.api.nvim_buf_set_name(state.bufnr, "Codex Agent")
 
   state.job_id = vim.fn.termopen({ "codex" }, {
