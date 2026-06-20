@@ -31,6 +31,8 @@ There is no formal test suite. Validate changes by launching `nvim` and by runni
 
 Recent history uses short imperative subjects, sometimes with conventional prefixes such as `docs:` and `fix:`. Examples: `Fix typing text wrapping`, `docs: Explain more about how to add and remove autocmds`. Keep commits scoped to one change and mention affected modules when useful.
 
+Record every behavior or configuration change in `CHANGELOG.md` before committing or handing off work.
+
 Pull requests should include a brief description, validation steps run, and screenshots or terminal notes only when UI or terminal layout behavior changes. Link related issues when applicable and call out any plugin lockfile changes.
 
 ## Agent-Specific Instructions

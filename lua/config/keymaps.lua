@@ -30,8 +30,8 @@ local function numbered_terminal(count, cwd)
   end
 end
 
-local function visible_terminal_infos()
-  local infos = {}
+local function visible_terminal_windows()
+  local windows = {}
   for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
     local bufnr = vim.api.nvim_win_get_buf(winid)
     local info = vim.b[bufnr].snacks_terminal
@@ -42,10 +42,57 @@ local function visible_terminal_infos()
       and snacks_win.position == "bottom"
       and vim.api.nvim_win_get_config(winid).relative == ""
     then
-      infos[#infos + 1] = info
+      local pos = vim.api.nvim_win_get_position(winid)
+      windows[#windows + 1] = {
+        winid = winid,
+        info = info,
+        id = tonumber(info.id) or math.huge,
+        row = pos[1],
+        col = pos[2],
+      }
     end
   end
+
+  table.sort(windows, function(a, b)
+    return a.row == b.row and a.col < b.col or a.row < b.row
+  end)
+
+  return windows
+end
+
+local function visible_terminal_infos()
+  local infos = {}
+  for _, terminal_win in ipairs(visible_terminal_windows()) do
+    infos[#infos + 1] = terminal_win.info
+  end
   return infos
+end
+
+local function sort_visible_terminals(preferred_win)
+  local fallback_win = vim.api.nvim_get_current_win()
+
+  for _ = 1, MAX_TERMINALS * MAX_TERMINALS do
+    local windows = visible_terminal_windows()
+    local swapped = false
+
+    for index = 1, #windows - 1 do
+      if windows[index].id > windows[index + 1].id then
+        vim.api.nvim_set_current_win(windows[index].winid)
+        vim.cmd("wincmd x")
+        swapped = true
+        break
+      end
+    end
+
+    if not swapped then
+      break
+    end
+  end
+
+  local restore_win = preferred_win and vim.api.nvim_win_is_valid(preferred_win) and preferred_win or fallback_win
+  if restore_win and vim.api.nvim_win_is_valid(restore_win) then
+    vim.api.nvim_set_current_win(restore_win)
+  end
 end
 
 local function first_visible_terminal_count()
@@ -80,7 +127,8 @@ local function focus_numbered_terminal(count)
   end
 
   vim.schedule(function()
-    Snacks.terminal.focus(nil, { cwd = cwd or LazyVim.root(), count = count })
+    local terminal = Snacks.terminal.focus(nil, { cwd = cwd or LazyVim.root(), count = count })
+    sort_visible_terminals(terminal and terminal.win)
     vim.cmd("redraw!")
   end)
 end
@@ -97,7 +145,7 @@ end
 local function focus_next_root_terminal()
   local terminal = current_snacks_terminal()
   local cwd = terminal and terminal.cwd or LazyVim.root()
-  local count = terminal_count((terminal and tonumber(terminal.id) or 1) + 1)
+  local count = terminal and terminal_count((tonumber(terminal.id) or 1) + 1) or 1
   local target = numbered_terminal(count, cwd)
   if not (target and target.win and vim.api.nvim_win_is_valid(target.win)) and not has_room_for_new_terminal() then
     count = first_visible_terminal_count()
@@ -120,22 +168,22 @@ vim.keymap.set("i", "<Esc>h", codex.toggle, { desc = "Toggle Codex agent" })
 
 vim.keymap.set({ "n", "i", "t" }, "<C-/>", toggle_current_terminal, { desc = "Toggle Current Terminal" })
 vim.keymap.set({ "n", "i", "t" }, "<C-_>", toggle_current_terminal, { desc = "Toggle Current Terminal" })
-vim.keymap.set({ "n", "i", "t" }, "<M-1>", function()
+vim.keymap.set({ "n", "i", "t" }, "<M-u>", function()
   focus_numbered_terminal(1)
 end, { desc = "Terminal 1 (Root Dir)" })
-vim.keymap.set({ "n", "i", "t" }, "<M-2>", function()
+vim.keymap.set({ "n", "i", "t" }, "<M-i>", function()
   focus_numbered_terminal(2)
 end, { desc = "Terminal 2 (Root Dir)" })
-vim.keymap.set({ "n", "i", "t" }, "<M-3>", function()
+vim.keymap.set({ "n", "i", "t" }, "<M-o>", function()
   focus_numbered_terminal(3)
 end, { desc = "Terminal 3 (Root Dir)" })
-vim.keymap.set({ "n", "i", "t" }, "<A-1>", function()
+vim.keymap.set({ "n", "i", "t" }, "<A-u>", function()
   focus_numbered_terminal(1)
 end, { desc = "Terminal 1 (Root Dir)" })
-vim.keymap.set({ "n", "i", "t" }, "<A-2>", function()
+vim.keymap.set({ "n", "i", "t" }, "<A-i>", function()
   focus_numbered_terminal(2)
 end, { desc = "Terminal 2 (Root Dir)" })
-vim.keymap.set({ "n", "i", "t" }, "<A-3>", function()
+vim.keymap.set({ "n", "i", "t" }, "<A-o>", function()
   focus_numbered_terminal(3)
 end, { desc = "Terminal 3 (Root Dir)" })
 vim.keymap.set({ "n", "i", "t" }, "<M-/>", focus_next_root_terminal, { desc = "Next Terminal (Root Dir)" })
